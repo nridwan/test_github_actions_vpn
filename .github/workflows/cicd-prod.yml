@@ -1,0 +1,46 @@
+name: CI/CD Prod
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install VPN
+        env:
+        run: |
+          dbus-uuidgen > /var/lib/dbus/machine-id
+          mkdir -p /var/run/dbus
+          dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:nm-l2tp/network-manager-l2tp > /dev/null 2>&1
+          sudo apt-get install -y network-manager-l2tp
+          exit 0
+      - name: Configure VPN
+        env:
+          VPN_IP: ${{ secrets.PROD_VPN_IP }}
+          VPN_KEY: ${{ secrets.PROD_VPN_KEY }}
+          VPN_USERNAME: ${{ secrets.PROD_VPN_USERNAME }}
+          VPN_PASSWORD: ${{ secrets.PROD_VPN_PASSWORD }}
+        run: |
+          sudo nmcli connection add connection.id vpndefault con-name vpndefault type VPN vpn-type l2tp ifname -- connection.autoconnect no ipv4.method auto vpn.data "gateway = ${VPN_IP}, ipsec-enabled = yes, mru = 1400, mtu = 1400, password-flags = 0, refuse-chap = yes, refuse-mschap = yes, refuse-pap = yes, require-mppe = yes, user = ${VPN_USERNAME}" vpn.secrets "password=${VPN_PASSWORD}, ipsec-psk = ${VPN_KEY}"
+          nmcli c up vpndefault
+          exit 0
+
+      - name: Deploy to Server
+        uses: easingthemes/ssh-deploy@v2.2.11
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SERVER_SSH_KEY }}
+          ARGS: '-rltgoDzvO --delete'
+          SOURCE: 'build/'
+          REMOTE_HOST: ${{ secrets.PROD_REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.PROD_REMOTE_USER }}
+          TARGET: ${{ secrets.PROD_REMOTE_TARGET }}
+
+      - name: Close VPN
+        env:
+          VPN_IP: ${{ secrets.PROD_VPN_IP }}
+          VPN_KEY: ${{ secrets.PROD_VPN_KEY }}
+          VPN_USERNAME: ${{ secrets.PROD_VPN_USERNAME }}
+          VPN_PASSWORD: ${{ secrets.PROD_VPN_PASSWORD }}
+        run: |
+          nmcli c down vpndefault
+          exit 0
